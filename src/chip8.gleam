@@ -1,4 +1,5 @@
 import gleam/dict
+import gleam/float
 import gleam/int
 import gleam/list
 import gleam/option.{None, Some}
@@ -156,7 +157,7 @@ pub fn new_system() -> System {
     iv.repeat(0, times: 4096)
     |> iv.replace(at: 80, replace: list.length(font), with: iv.from_list(font))
 
-  let assert Ok(screen) = iv.repeat(False, times: 2048) |> iv.set(3, True)
+  let assert Ok(screen) = iv.repeat(False, times: 2048) |> iv.set(1024, True)
 
   System(
     pc: 512,
@@ -267,7 +268,7 @@ fn view(model: Model) {
       tiramisu.scene(
         "scene",
         [
-          scene.background_color(0x000000),
+          scene.background_color(0x00FFFF),
         ],
         [
           tiramisu.camera(
@@ -275,21 +276,21 @@ fn view(model: Model) {
             [
               camera.active(True),
               camera.orthographic(),
-              // camera.left(-320.0),
-              // camera.right(320.0),
-              // camera.top(160.0),
-              // camera.bottom(-160.0),
-              // camera.near(0.1),
-              // camera.far(100.0),
+              camera.left(0.0),
+              camera.right(64.0),
+              camera.top(0.0),
+              camera.bottom(32.0),
+              camera.near(0.1),
+              camera.far(100.0),
               transform.position(vec3.Vec3(0.0, 0.0, 20.0)),
             ],
             [],
           ),
           tiramisu.empty("screen", [], {
-            let pixel_geom = primitive.box(vec3.Vec3(10.0, 10.0, 1.0))
+            let pixel_geom = primitive.box(vec3.Vec3(1.0, 1.0, 0.0))
             iv.index_map(model.system.screen, fn(on, idx) {
-              let x = { idx % 64 } * 10 |> int.to_float()
-              let y = { idx / 64 } * 10 |> int.to_float()
+              let x = { idx % 64 } |> int.to_float() |> float.add(0.5)
+              let y = { idx / 64 } |> int.to_float() |> float.add(0.5)
 
               let color = case on {
                 True -> 0xFFFFFF
@@ -300,6 +301,7 @@ fn view(model: Model) {
                 "pixel-" <> int.to_string(idx),
                 [
                   pixel_geom,
+                  material.basic(),
                   material.color(color),
                   transform.position(vec3.Vec3(x, y, 0.0)),
                 ],
