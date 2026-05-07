@@ -6,7 +6,6 @@ import gleam/float
 import gleam/int
 import gleam/javascript/promise.{type Promise}
 import gleam/list
-import gleam/option.{None, Some}
 import gleam/result
 import gleam/time/duration
 import iv
@@ -146,6 +145,7 @@ pub type SystemError {
   RegisterNotFoundError
   ScreenOutOfBoundsError
   MemoryOutOfBoundsError
+  InvalidReturnError
   LoadROMError
 }
 
@@ -162,15 +162,35 @@ pub type System {
   )
 }
 
+pub type DecrementPosition {
+  Minuend
+  Subtrahend
+}
+
+pub type ShiftDirection {
+  ShiftLeft
+  ShiftRight
+}
+
 pub type Instruction {
   Clear
+  Call(address: Int)
   Jump(address: Int)
-  Set(reg: Int, value: Int)
-  Add(reg: Int, value: Int)
+  Return
+  SetRegToVal(reg: Int, value: Int)
+  AddValToReg(reg: Int, value: Int)
   SetIdx(address: Int)
   Display(reg_x: Int, reg_y: Int, height: Int)
   SkipValEq(reg: Int, value: Int, equality: Bool)
   SkipRegEq(reg_x: Int, reg_y: Int, equality: Bool)
+  SetXToY(reg_x: Int, reg_y: Int)
+  Or(reg_x: Int, reg_y: Int)
+  And(reg_x: Int, reg_y: Int)
+  Xor(reg_x: Int, reg_y: Int)
+  AddYToX(reg_x: Int, reg_y: Int)
+  SubYFromX(reg_x: Int, reg_y: Int)
+  SubXFromY(reg_x: Int, reg_y: Int)
+  Shift(reg_x: Int, to: ShiftDirection)
 }
 
 // SYSTEM
@@ -201,7 +221,9 @@ pub fn new_system(rom: List(Int)) -> Result(System, SystemError) {
     stack: [],
     delay_timer: 360,
     sound_timer: 0,
-    registers: dict.new(),
+    registers: int.range(from: 0, to: 16, with: dict.new(), run: fn(acc, i) {
+      dict.insert(acc, i, 0)
+    }),
     memory:,
   ))
 }
@@ -237,21 +259,65 @@ fn set_register(
   registers: dict.Dict(Int, Int),
   reg reg: Int,
   to to: Int,
-) -> dict.Dict(Int, Int) {
-  dict.insert(registers, reg, to)
+) -> Result(dict.Dict(Int, Int), SystemError) {
+  use <- bool.guard(
+    !dict.has_key(registers, reg),
+    return: Error(RegisterNotFoundError),
+  )
+  Ok(dict.insert(registers, reg, to))
 }
 
 fn inc_register(
   registers: dict.Dict(Int, Int),
   reg reg: Int,
   with with: Int,
-) -> dict.Dict(Int, Int) {
-  dict.upsert(registers, reg, fn(x) {
-    case x {
-      Some(i) -> i + with
-      None -> with
-    }
-  })
+  set_flag set_flag: Bool,
+) -> Result(dict.Dict(Int, Int), SystemError) {
+  use current <- result.try(get_register(registers, reg))
+  let result = current + with
+  use registers <- result.try(set_register(
+    registers,
+    reg,
+    int.bitwise_and(result, 0xFF),
+  ))
+
+  use <- bool.guard(when: !set_flag, return: Ok(registers))
+
+  // Set flag to 1 when result has overflowed, otherwise 0
+  let flag = case result > 255 {
+    True -> 1
+    False -> 0
+  }
+
+  set_register(registers, reg_vf, flag)
+}
+
+fn decr_register(
+  registers: dict.Dict(Int, Int),
+  reg reg: Int,
+  with with: Int,
+  reg_position reg_position: DecrementPosition,
+) -> Result(dict.Dict(Int, Int), SystemError) {
+  use current <- result.try(get_register(registers, reg))
+
+  let result = case reg_position {
+    Minuend -> current - with
+    Subtrahend -> with - current
+  }
+
+  use registers <- result.try(set_register(
+    registers,
+    reg,
+    { result + 256 } % 256,
+  ))
+
+  // Set flag to 0 when result has underflowed, otherwise 1
+  let flag = case result < 0 {
+    True -> 0
+    False -> 1
+  }
+
+  set_register(registers, reg_vf, flag)
 }
 
 fn display(
@@ -266,7 +332,7 @@ fn display(
   let x = int.bitwise_and(vx, screen_width - 1)
   let y = int.bitwise_and(vy, screen_height - 1)
 
-  let registers = set_register(system.registers, reg: reg_vf, to: 0)
+  use registers <- result.try(set_register(system.registers, reg: reg_vf, to: 0))
   let system = System(..system, registers:)
 
   display_loop(system, x, y, height, 0)
@@ -346,11 +412,9 @@ fn draw_pixel(
     at: pixel_idx,
     to: new_pixel,
   ))
-  let registers = case collision {
-    True -> set_register(system.registers, reg: reg_vf, to: 1)
-    False -> system.registers
-  }
 
+  use <- bool.guard(when: !collision, return: Ok(System(..system, screen:)))
+  use registers <- result.try(set_register(system.registers, reg: reg_vf, to: 1))
   Ok(System(..system, screen:, registers:))
 }
 
@@ -367,27 +431,47 @@ fn fetch(system: System) -> Result(#(System, BitArray), SystemError) {
 fn decode(instruction_arr: BitArray) -> Result(Instruction, SystemError) {
   case instruction_arr {
     // 00E0
-    <<0:4, 0:4, 14:4, 0:4>> -> Ok(Clear)
+    <<0x0:4, 0x0:4, 0xE:4, 0x0:4>> -> Ok(Clear)
+    // 00EE
+    <<0x0:4, 0x0:4, 0xE:4, 0xE:4>> -> Ok(Return)
     // 1NNN
-    <<1:4, address:12>> -> Ok(Jump(address:))
+    <<0x1:4, address:12>> -> Ok(Jump(address:))
+    // 2NNN
+    <<0x2:4, address:12>> -> Ok(Call(address:))
     // 3XNN
-    <<3:4, reg:4, value>> -> Ok(SkipValEq(reg:, value:, equality: True))
+    <<0x3:4, reg:4, value>> -> Ok(SkipValEq(reg:, value:, equality: True))
     // 4XNN
-    <<4:4, reg:4, value>> -> Ok(SkipValEq(reg:, value:, equality: False))
+    <<0x4:4, reg:4, value>> -> Ok(SkipValEq(reg:, value:, equality: False))
     // 5XY0
-    <<5:4, reg_x:4, reg_y:4, 0:4>> ->
+    <<0x5:4, reg_x:4, reg_y:4, 0x0:4>> ->
       Ok(SkipRegEq(reg_x:, reg_y:, equality: True))
     // 6XNN
-    <<6:4, reg:4, value>> -> Ok(Set(reg:, value:))
+    <<0x6:4, reg:4, value>> -> Ok(SetRegToVal(reg:, value:))
     // 7XNN
-    <<7:4, reg:4, value>> -> Ok(Add(reg:, value:))
+    <<0x7:4, reg:4, value>> -> Ok(AddValToReg(reg:, value:))
     // 9XY0
-    <<9:4, reg_x:4, reg_y:4, 0:4>> ->
+    <<0x9:4, reg_x:4, reg_y:4, 0x0:4>> ->
       Ok(SkipRegEq(reg_x:, reg_y:, equality: False))
     // ANNN
-    <<10:4, address:12>> -> Ok(SetIdx(address:))
+    <<0xA:4, address:12>> -> Ok(SetIdx(address:))
     // DXYN
-    <<13:4, reg_x:4, reg_y:4, height:4>> -> Ok(Display(reg_x:, reg_y:, height:))
+    <<0xD:4, reg_x:4, reg_y:4, height:4>> ->
+      Ok(Display(reg_x:, reg_y:, height:))
+    // 8XY_ Logical and arithmetic instructions
+    <<0x8:4, reg_x:4, reg_y:4, op:4>> -> {
+      case op {
+        0x0 -> Ok(SetXToY(reg_x:, reg_y:))
+        0x1 -> Ok(Or(reg_x:, reg_y:))
+        0x2 -> Ok(And(reg_x:, reg_y:))
+        0x3 -> Ok(Xor(reg_x:, reg_y:))
+        0x4 -> Ok(AddYToX(reg_x:, reg_y:))
+        0x5 -> Ok(SubYFromX(reg_x:, reg_y:))
+        0x6 -> Ok(Shift(reg_x:, to: ShiftRight))
+        0x7 -> Ok(SubXFromY(reg_x:, reg_y:))
+        0xE -> Ok(Shift(reg_x:, to: ShiftLeft))
+        _ -> Error(DecodeError)
+      }
+    }
     _ -> Error(DecodeError)
   }
 }
@@ -398,13 +482,34 @@ fn execute(
 ) -> Result(System, SystemError) {
   case instruction {
     Clear -> Ok(clear_screen(system))
+    Call(address:) -> {
+      let stack = list.prepend(system.stack, system.pc)
+      Ok(System(..system, stack:, pc: address))
+    }
+    Return -> {
+      case system.stack {
+        [next_pc, ..rest] -> {
+          Ok(System(..system, stack: rest, pc: next_pc))
+        }
+        _ -> Error(InvalidReturnError)
+      }
+    }
     Jump(address:) -> Ok(System(..system, pc: address))
-    Set(reg:, value:) -> {
-      let registers = set_register(system.registers, reg:, to: value)
+    SetRegToVal(reg:, value:) -> {
+      use registers <- result.try(set_register(
+        system.registers,
+        reg:,
+        to: value,
+      ))
       Ok(System(..system, registers:))
     }
-    Add(reg:, value:) -> {
-      let registers = inc_register(system.registers, reg:, with: value)
+    AddValToReg(reg:, value:) -> {
+      use registers <- result.try(inc_register(
+        system.registers,
+        reg:,
+        with: value,
+        set_flag: False,
+      ))
       Ok(System(..system, registers:))
     }
     SetIdx(address:) -> {
@@ -421,6 +526,105 @@ fn execute(
       use vy <- result.try(get_register(system.registers, reg_y))
       use <- bool.guard({ vx == vy } != equality, return: Ok(system))
       Ok(System(..system, pc: system.pc + 2))
+    }
+    SetXToY(reg_x:, reg_y:) -> {
+      use vy <- result.try(get_register(system.registers, reg_y))
+      use registers <- result.try(set_register(
+        system.registers,
+        reg: reg_x,
+        to: vy,
+      ))
+      Ok(System(..system, registers:))
+    }
+    Or(reg_x:, reg_y:) -> {
+      use vx <- result.try(get_register(system.registers, reg_x))
+      use vy <- result.try(get_register(system.registers, reg_y))
+      use registers <- result.try(set_register(
+        system.registers,
+        reg: reg_x,
+        to: int.bitwise_or(vx, vy),
+      ))
+      Ok(System(..system, registers:))
+    }
+    And(reg_x:, reg_y:) -> {
+      use vx <- result.try(get_register(system.registers, reg_x))
+      use vy <- result.try(get_register(system.registers, reg_y))
+      use registers <- result.try(set_register(
+        system.registers,
+        reg: reg_x,
+        to: int.bitwise_and(vx, vy),
+      ))
+      Ok(System(..system, registers:))
+    }
+    Xor(reg_x:, reg_y:) -> {
+      use vx <- result.try(get_register(system.registers, reg_x))
+      use vy <- result.try(get_register(system.registers, reg_y))
+      use registers <- result.try(set_register(
+        system.registers,
+        reg: reg_x,
+        to: int.bitwise_exclusive_or(vx, vy),
+      ))
+      Ok(System(..system, registers:))
+    }
+    AddYToX(reg_x:, reg_y:) -> {
+      use vy <- result.try(get_register(system.registers, reg_y))
+      use registers <- result.try(inc_register(
+        system.registers,
+        reg: reg_x,
+        with: vy,
+        set_flag: True,
+      ))
+      Ok(System(..system, registers:))
+    }
+    SubYFromX(reg_x:, reg_y:) -> {
+      use vy <- result.try(get_register(system.registers, reg_y))
+      use registers <- result.try(decr_register(
+        system.registers,
+        reg: reg_x,
+        with: vy,
+        reg_position: Minuend,
+      ))
+      Ok(System(..system, registers:))
+    }
+    SubXFromY(reg_x:, reg_y:) -> {
+      use vy <- result.try(get_register(system.registers, reg_y))
+      use registers <- result.try(decr_register(
+        system.registers,
+        reg: reg_x,
+        with: vy,
+        reg_position: Subtrahend,
+      ))
+      Ok(System(..system, registers:))
+    }
+    Shift(reg_x:, to:) -> {
+      use vx <- result.try(get_register(system.registers, reg_x))
+
+      case to {
+        ShiftRight -> {
+          // Using bitarray matching here to avoid BigInt
+          let assert <<rest:7, lsb:1>> = <<vx>>
+          let assert <<new_vx:8>> = <<0:1, rest:7>>
+          use registers <- result.try(set_register(
+            system.registers,
+            reg_x,
+            new_vx,
+          ))
+          use registers <- result.try(set_register(registers, reg_vf, lsb))
+          Ok(System(..system, registers:))
+        }
+        ShiftLeft -> {
+          // Using bitarray matching here to avoid BigInt
+          let assert <<msb:1, rest:7>> = <<vx>>
+          let assert <<new_vx:8>> = <<rest:7, 0:1>>
+          use registers <- result.try(set_register(
+            system.registers,
+            reg_x,
+            new_vx,
+          ))
+          use registers <- result.try(set_register(registers, reg_vf, msb))
+          Ok(System(..system, registers:))
+        }
+      }
     }
   }
 }
