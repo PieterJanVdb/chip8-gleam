@@ -1,3 +1,4 @@
+import gleam/bool
 import gleam/dict
 import gleam/dynamic
 import gleam/dynamic/decode
@@ -23,6 +24,8 @@ import tiramisu/transform
 import vec/vec3
 
 const target_ips = 700.0
+
+const delay_timer_step_ms = 16.666667
 
 const memory_size = 4096
 
@@ -166,11 +169,13 @@ pub type Instruction {
   Add(reg: Int, value: Int)
   SetIdx(address: Int)
   Display(reg_x: Int, reg_y: Int, height: Int)
+  SkipValEq(reg: Int, value: Int, equality: Bool)
+  SkipRegEq(reg_x: Int, reg_y: Int, equality: Bool)
 }
 
 // SYSTEM
 
-pub fn new_system() -> System {
+pub fn new_system(rom: List(Int)) -> Result(System, SystemError) {
   let assert Ok(memory) =
     iv.repeat(0, times: memory_size)
     |> iv.replace(
@@ -179,26 +184,9 @@ pub fn new_system() -> System {
       with: iv.from_list(font),
     )
 
-  System(
-    pc: pc_init_location,
-    screen: iv.repeat(False, times: screen_size),
-    index_register: 0,
-    stack: [],
-    delay_timer: 0,
-    sound_timer: 0,
-    registers: dict.new(),
-    memory:,
-  )
-}
-
-fn clear_screen(system: System) -> System {
-  System(..system, screen: iv.repeat(False, times: screen_size))
-}
-
-pub fn load_rom(system: System, rom: List(Int)) -> Result(System, SystemError) {
   use memory <- result.try(
     iv.replace(
-      system.memory,
+      memory,
       at: pc_init_location,
       replace: list.length(rom),
       with: iv.from_list(rom),
@@ -206,7 +194,20 @@ pub fn load_rom(system: System, rom: List(Int)) -> Result(System, SystemError) {
     |> result.replace_error(LoadROMError),
   )
 
-  Ok(System(..system, memory:))
+  Ok(System(
+    pc: pc_init_location,
+    screen: iv.repeat(False, times: screen_size),
+    index_register: 0,
+    stack: [],
+    delay_timer: 360,
+    sound_timer: 0,
+    registers: dict.new(),
+    memory:,
+  ))
+}
+
+fn clear_screen(system: System) -> System {
+  System(..system, screen: iv.repeat(False, times: screen_size))
 }
 
 fn get_byte_at(memory: iv.Array(Int), at at: Int) -> Result(Int, SystemError) {
@@ -365,11 +366,27 @@ fn fetch(system: System) -> Result(#(System, BitArray), SystemError) {
 
 fn decode(instruction_arr: BitArray) -> Result(Instruction, SystemError) {
   case instruction_arr {
+    // 00E0
     <<0:4, 0:4, 14:4, 0:4>> -> Ok(Clear)
+    // 1NNN
     <<1:4, address:12>> -> Ok(Jump(address:))
+    // 3XNN
+    <<3:4, reg:4, value>> -> Ok(SkipValEq(reg:, value:, equality: True))
+    // 4XNN
+    <<4:4, reg:4, value>> -> Ok(SkipValEq(reg:, value:, equality: False))
+    // 5XY0
+    <<5:4, reg_x:4, reg_y:4, 0:4>> ->
+      Ok(SkipRegEq(reg_x:, reg_y:, equality: True))
+    // 6XNN
     <<6:4, reg:4, value>> -> Ok(Set(reg:, value:))
+    // 7XNN
     <<7:4, reg:4, value>> -> Ok(Add(reg:, value:))
+    // 9XY0
+    <<9:4, reg_x:4, reg_y:4, 0:4>> ->
+      Ok(SkipRegEq(reg_x:, reg_y:, equality: False))
+    // ANNN
     <<10:4, address:12>> -> Ok(SetIdx(address:))
+    // DXYN
     <<13:4, reg_x:4, reg_y:4, height:4>> -> Ok(Display(reg_x:, reg_y:, height:))
     _ -> Error(DecodeError)
   }
@@ -394,6 +411,17 @@ fn execute(
       Ok(System(..system, index_register: address))
     }
     Display(reg_x:, reg_y:, height:) -> display(system, reg_x:, reg_y:, height:)
+    SkipValEq(reg:, value:, equality:) -> {
+      use reg_value <- result.try(get_register(system.registers, reg))
+      use <- bool.guard({ reg_value == value } != equality, return: Ok(system))
+      Ok(System(..system, pc: system.pc + 2))
+    }
+    SkipRegEq(reg_x:, reg_y:, equality:) -> {
+      use vx <- result.try(get_register(system.registers, reg_x))
+      use vy <- result.try(get_register(system.registers, reg_y))
+      use <- bool.guard({ vx == vy } != equality, return: Ok(system))
+      Ok(System(..system, pc: system.pc + 2))
+    }
   }
 }
 
@@ -405,7 +433,7 @@ pub fn run(system: System) -> Result(System, SystemError) {
   Ok(system)
 }
 
-pub fn run_n(system: System, n: Int) -> Result(System, SystemError) {
+fn run_n(system: System, n: Int) -> Result(System, SystemError) {
   case n {
     0 -> Ok(system)
     _ -> {
@@ -417,8 +445,13 @@ pub fn run_n(system: System, n: Int) -> Result(System, SystemError) {
 
 // LUSTRE / TIRAMISU
 
+pub type RomLoadedModel {
+  RomLoadedModel(system: System, accumulator_ms: Float)
+}
+
 pub type Model {
-  Model(system: System)
+  RomLoaded(RomLoadedModel)
+  RomPending
 }
 
 pub type Msg {
@@ -439,28 +472,24 @@ fn init(_flags: Nil) -> #(Model, Effect(Msg)) {
 }
 
 fn init_model() -> Model {
-  Model(system: new_system())
+  RomPending
 }
 
 fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
   case msg {
     Tick(tick) -> {
-      // Tick runs 60 times per second, so we try to run n instructions in a single
-      // tick to get to about 700 instructions per second
-      let delta = duration.to_seconds(tick.delta_time)
-      let clamped_delta = float.min(delta, 0.1)
-      let n = float.round(target_ips *. clamped_delta)
-
-      case run_n(model.system, n) {
-        Ok(system) -> #(Model(system:), effect.none())
-        // TODO: handle error
-        Error(_) -> #(model, effect.none())
+      case model {
+        RomLoaded(model) -> handle_tick(model, tick)
+        RomPending -> #(model, effect.none())
       }
     }
     UserSelectedRom(rom_file) -> #(model, read_rom_file(rom_file))
     RomFileRead(bytes) -> {
-      case load_rom(model.system, bytes) {
-        Ok(system) -> #(Model(system:), effect.none())
+      case new_system(bytes) {
+        Ok(system) -> #(
+          RomLoaded(RomLoadedModel(system:, accumulator_ms: 0.0)),
+          effect.none(),
+        )
         Error(_) -> #(model, effect.none())
       }
     }
@@ -474,7 +503,7 @@ fn view(model: Model) {
       html.input([
         attribute.type_("file"),
         attribute.name("rom"),
-        attribute.accept([".ch8", "application/octect-stream"]),
+        attribute.accept([".ch8", "application/octet-stream"]),
         event.on("change", decode.map(file_decoder(), UserSelectedRom)),
       ]),
     ]),
@@ -503,22 +532,27 @@ fn view(model: Model) {
             [],
           ),
           tiramisu.empty("screen", [], {
-            let pixel_geom = primitive.box(vec3.Vec3(1.0, 1.0, 0.0))
-            iv.index_map(model.system.screen, fn(on, idx) {
-              let #(x, y) = index_to_coords(idx)
+            case model {
+              RomPending -> []
+              RomLoaded(model) -> {
+                let pixel_geom = primitive.box(vec3.Vec3(1.0, 1.0, 0.0))
+                iv.index_map(model.system.screen, fn(on, idx) {
+                  let #(x, y) = index_to_coords(idx)
 
-              tiramisu.primitive(
-                "pixel-" <> int.to_string(idx),
-                [
-                  pixel_geom,
-                  material.basic(),
-                  material.color(pixel_state_to_color(on)),
-                  transform.position(vec3.Vec3(x, y, 0.0)),
-                ],
-                [],
-              )
-            })
-            |> iv.to_list
+                  tiramisu.primitive(
+                    "pixel-" <> int.to_string(idx),
+                    [
+                      pixel_geom,
+                      material.basic(),
+                      material.color(pixel_state_to_color(on)),
+                      transform.position(vec3.Vec3(x, y, 0.0)),
+                    ],
+                    [],
+                  )
+                })
+                |> iv.to_list
+              }
+            }
           }),
         ]),
       ],
@@ -559,4 +593,47 @@ fn pixel_state_to_color(on: Bool) -> Int {
     True -> 0xFFFFFF
     False -> 0x000000
   }
+}
+
+fn handle_tick(
+  model: RomLoadedModel,
+  tick: renderer.Tick,
+) -> #(Model, Effect(a)) {
+  // Tick should run about 60 times per second, so we try to run
+  // n instructions in a single tick to get to about 700 IPS
+  let n_instructions = get_n_frame_instructions(tick.delta_time)
+  let model = handle_timers(model, delta: tick.delta_time)
+
+  case run_n(model.system, n_instructions) {
+    Ok(system) -> #(RomLoaded(RomLoadedModel(..model, system:)), effect.none())
+    // TODO: handle error
+    Error(_) -> #(RomLoaded(model), effect.none())
+  }
+}
+
+fn get_n_frame_instructions(delta delta: duration.Duration) -> Int {
+  let delta = duration.to_seconds(delta)
+  let clamped_delta = float.min(delta, 0.1)
+  float.round(target_ips *. clamped_delta)
+}
+
+fn handle_timers(
+  model: RomLoadedModel,
+  delta delta: duration.Duration,
+) -> RomLoadedModel {
+  let delta_ms = duration.to_seconds(delta) *. 1000.0
+  let acc = model.accumulator_ms +. delta_ms
+
+  // How many whole 1/60s steps fit into the accumulator?
+  let steps = float.truncate(acc /. delay_timer_step_ms)
+  let leftover = acc -. int.to_float(steps) *. delay_timer_step_ms
+
+  RomLoadedModel(
+    system: System(
+      ..model.system,
+      delay_timer: int.max(0, model.system.delay_timer - 1),
+      sound_timer: int.max(0, model.system.sound_timer - 1),
+    ),
+    accumulator_ms: leftover,
+  )
 }
