@@ -1,1 +1,17 @@
 @import "tailwindcss";
+@import url("https://fonts.googleapis.com/css2?family=VT323&display=swap");
+
+@theme {
+  --color-phosphor: #ffb000;
+  --color-phosphor-dim: #2a1a00;
+  --color-phosphor-bg: #1a0e00;
+  --font-mono: "VT323", ui-monospace, monospace;
+}
+
+@layer base {
+  body {
+    background-color: var(--color-phosphor-bg);
+    color: var(--color-phosphor);
+    font-family: var(--font-mono);
+  }
+}

@@ -20,6 +20,7 @@ import tiramisu/camera
 import tiramisu/material
 import tiramisu/primitive
 import tiramisu/renderer
+import tiramisu/scene
 import tiramisu/transform
 import vec/vec3
 
@@ -884,67 +885,95 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
 
 fn view(model: Model) {
   html.main(
-    [attribute.class("h-screen flex flex-col justify-center items-center")],
     [
-      html.div([], [
-        html.label([attribute.for("rom")], [html.text("Choose a Chip8 ROM:")]),
-        html.input([
-          attribute.type_("file"),
-          attribute.name("rom"),
-          attribute.accept([".ch8", "application/octet-stream"]),
-          event.on("change", decode.map(file_decoder(), UserSelectedRom)),
+      attribute.class(
+        "min-h-screen flex flex-col items-center gap-6 p-8 bg-phosphor-bg text-phosphor font-mono",
+      ),
+    ],
+    [
+      html.header([], [
+        html.h1([attribute.class("text-6xl tracking-widest")], [
+          html.text("CHIP-8"),
         ]),
       ]),
-      tiramisu.renderer(
-        "renderer",
+      html.label(
         [
-          renderer.width(screen_width * 10),
-          renderer.height(screen_height * 10),
-          renderer.on_tick(Tick),
+          attribute.class(
+            "cursor-pointer border border-phosphor px-6 py-2 text-2xl tracking-wider hover:bg-phosphor hover:text-phosphor-bg transition-colors",
+          ),
         ],
         [
-          tiramisu.scene("scene", [], [
-            tiramisu.camera(
-              "camera",
-              [
-                camera.active(True),
-                camera.orthographic(),
-                camera.left(0.0),
-                camera.right(int.to_float(screen_width)),
-                camera.top(0.0),
-                camera.bottom(int.to_float(screen_height)),
-                camera.near(0.1),
-                camera.far(100.0),
-                transform.position(vec3.Vec3(0.0, 0.0, 20.0)),
-              ],
-              [],
-            ),
-            tiramisu.empty("screen", [], {
-              case model {
-                RomPending -> []
-                RomLoaded(model) -> {
-                  let pixel_geom = primitive.box(vec3.Vec3(1.0, 1.0, 0.0))
-                  iv.index_map(model.system.screen, fn(on, idx) {
-                    let #(x, y) = index_to_coords(idx)
-
-                    tiramisu.primitive(
-                      "pixel-" <> int.to_string(idx),
-                      [
-                        pixel_geom,
-                        material.basic(),
-                        material.color(pixel_state_to_color(on)),
-                        transform.position(vec3.Vec3(x, y, 0.0)),
-                      ],
-                      [],
-                    )
-                  })
-                  |> iv.to_list
-                }
-              }
-            }),
+          html.text("[ LOAD ROM ]"),
+          html.input([
+            attribute.class("sr-only"),
+            attribute.type_("file"),
+            attribute.accept([".ch8", "application/octet-stream"]),
+            event.on("change", decode.map(file_decoder(), UserSelectedRom)),
           ]),
         ],
       ),
+      html.div([attribute.class("border border-phosphor")], [
+        tiramisu.renderer(
+          "renderer",
+          [
+            renderer.width(screen_width * 10),
+            renderer.height(screen_height * 10),
+            renderer.on_tick(Tick),
+          ],
+          [
+            tiramisu.scene(
+              "scene",
+              [scene.background_color(0x1A0E00)],
+              [
+                tiramisu.camera(
+                  "camera",
+                  [
+                    camera.active(True),
+                    camera.orthographic(),
+                    camera.left(0.0),
+                    camera.right(int.to_float(screen_width)),
+                    camera.top(0.0),
+                    camera.bottom(int.to_float(screen_height)),
+                    camera.near(0.1),
+                    camera.far(100.0),
+                    transform.position(vec3.Vec3(0.0, 0.0, 20.0)),
+                  ],
+                  [],
+                ),
+                tiramisu.empty("screen", [], {
+                  case model {
+                    RomPending -> []
+                    RomLoaded(model) -> {
+                      let pixel_geom = primitive.box(vec3.Vec3(1.0, 1.0, 0.0))
+                      iv.index_map(model.system.screen, fn(on, idx) {
+                        let #(x, y) = index_to_coords(idx)
+
+                        tiramisu.primitive(
+                          "pixel-" <> int.to_string(idx),
+                          [
+                            pixel_geom,
+                            material.basic(),
+                            material.color(pixel_state_to_color(on)),
+                            transform.position(vec3.Vec3(x, y, 0.0)),
+                          ],
+                          [],
+                        )
+                      })
+                      |> iv.to_list
+                    }
+                  }
+                }),
+              ],
+            ),
+          ],
+        ),
+      ]),
+      html.p([attribute.class("text-lg text-phosphor/70")], [
+        html.text("Keys: 1234 / QWER / ASDF / ZXCV"),
+      ]),
+      html.footer([attribute.class("mt-auto text-lg text-phosphor/70")], [
+        html.text("Made by Pieter-Jan"),
+      ]),
     ],
   )
 }
@@ -979,8 +1008,8 @@ fn index_to_coords(idx: Int) -> #(Float, Float) {
 
 fn pixel_state_to_color(on: Bool) -> Int {
   case on {
-    True -> 0xFFFFFF
-    False -> 0x000000
+    True -> 0xFFB000
+    False -> 0x2A1A00
   }
 }
 
