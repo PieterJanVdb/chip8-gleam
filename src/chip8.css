@@ -1,17 +1,19 @@
 @import "tailwindcss";
-@import url("https://fonts.googleapis.com/css2?family=VT323&display=swap");
 
 @theme {
-  --color-phosphor: #ffb000;
-  --color-phosphor-dim: #2a1a00;
-  --color-phosphor-bg: #1a0e00;
-  --font-mono: "VT323", ui-monospace, monospace;
+  --color-theme-bg: #1a1816;
+  --color-theme-fg: #d8d3c7;
+  --color-theme-accent: #c5a572;
+  --color-theme-muted: #6b665c;
+  --color-theme-pixel-off: #0f0d0b;
+  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", "IBM Plex Mono",
+    Menlo, Consolas, monospace;
 }
 
 @layer base {
   body {
-    background-color: var(--color-phosphor-bg);
-    color: var(--color-phosphor);
+    background-color: var(--color-theme-bg);
+    color: var(--color-theme-fg);
     font-family: var(--font-mono);
   }
 }

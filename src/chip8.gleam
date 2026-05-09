@@ -887,19 +887,20 @@ fn view(model: Model) {
   html.main(
     [
       attribute.class(
-        "min-h-screen flex flex-col items-center gap-6 p-8 bg-phosphor-bg text-phosphor font-mono",
+        "min-h-screen flex flex-col items-center gap-6 p-8 bg-theme-bg text-theme-fg font-mono",
       ),
     ],
     [
       html.header([], [
-        html.h1([attribute.class("text-6xl tracking-widest")], [
-          html.text("CHIP-8"),
-        ]),
+        html.h1(
+          [attribute.class("text-6xl tracking-widest text-theme-accent")],
+          [html.text("CHIP-8")],
+        ),
       ]),
       html.label(
         [
           attribute.class(
-            "cursor-pointer border border-phosphor px-6 py-2 text-2xl tracking-wider hover:bg-phosphor hover:text-phosphor-bg transition-colors",
+            "cursor-pointer border border-theme-accent text-theme-accent px-6 py-2 text-2xl tracking-wider hover:bg-theme-accent hover:text-theme-bg transition-colors",
           ),
         ],
         [
@@ -912,7 +913,7 @@ fn view(model: Model) {
           ]),
         ],
       ),
-      html.div([attribute.class("border border-phosphor")], [
+      html.div([attribute.class("border border-theme-accent")], [
         tiramisu.renderer(
           "renderer",
           [
@@ -923,7 +924,7 @@ fn view(model: Model) {
           [
             tiramisu.scene(
               "scene",
-              [scene.background_color(0x1A0E00)],
+              [scene.background_color(0x1A1816)],
               [
                 tiramisu.camera(
                   "camera",
@@ -968,10 +969,10 @@ fn view(model: Model) {
           ],
         ),
       ]),
-      html.p([attribute.class("text-lg text-phosphor/70")], [
+      html.p([attribute.class("text-lg text-theme-muted")], [
         html.text("Keys: 1234 / QWER / ASDF / ZXCV"),
       ]),
-      html.footer([attribute.class("mt-auto text-lg text-phosphor/70")], [
+      html.footer([attribute.class("mt-auto text-lg text-theme-muted")], [
         html.text("Made by Pieter-Jan"),
       ]),
     ],
@@ -1008,8 +1009,8 @@ fn index_to_coords(idx: Int) -> #(Float, Float) {
 
 fn pixel_state_to_color(on: Bool) -> Int {
   case on {
-    True -> 0xFFB000
-    False -> 0x2A1A00
+    True -> 0xC5A572
+    False -> 0x0F0D0B
   }
 }
 
