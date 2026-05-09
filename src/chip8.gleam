@@ -754,7 +754,6 @@ fn execute(
     GetKey(reg:) -> {
       case system.key_released {
         Some(key) -> {
-          echo key
           use registers <- result.try(set_register(
             system.registers,
             reg:,
@@ -884,67 +883,70 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
 }
 
 fn view(model: Model) {
-  html.main([], [
-    html.div([], [
-      html.label([attribute.for("rom")], [html.text("Choose a Chip8 ROM:")]),
-      html.input([
-        attribute.type_("file"),
-        attribute.name("rom"),
-        attribute.accept([".ch8", "application/octet-stream"]),
-        event.on("change", decode.map(file_decoder(), UserSelectedRom)),
-      ]),
-    ]),
-    tiramisu.renderer(
-      "renderer",
-      [
-        renderer.width(screen_width * 10),
-        renderer.height(screen_height * 10),
-        renderer.on_tick(Tick),
-      ],
-      [
-        tiramisu.scene("scene", [], [
-          tiramisu.camera(
-            "camera",
-            [
-              camera.active(True),
-              camera.orthographic(),
-              camera.left(0.0),
-              camera.right(int.to_float(screen_width)),
-              camera.top(0.0),
-              camera.bottom(int.to_float(screen_height)),
-              camera.near(0.1),
-              camera.far(100.0),
-              transform.position(vec3.Vec3(0.0, 0.0, 20.0)),
-            ],
-            [],
-          ),
-          tiramisu.empty("screen", [], {
-            case model {
-              RomPending -> []
-              RomLoaded(model) -> {
-                let pixel_geom = primitive.box(vec3.Vec3(1.0, 1.0, 0.0))
-                iv.index_map(model.system.screen, fn(on, idx) {
-                  let #(x, y) = index_to_coords(idx)
-
-                  tiramisu.primitive(
-                    "pixel-" <> int.to_string(idx),
-                    [
-                      pixel_geom,
-                      material.basic(),
-                      material.color(pixel_state_to_color(on)),
-                      transform.position(vec3.Vec3(x, y, 0.0)),
-                    ],
-                    [],
-                  )
-                })
-                |> iv.to_list
-              }
-            }
-          }),
+  html.main(
+    [attribute.class("h-screen flex flex-col justify-center items-center")],
+    [
+      html.div([], [
+        html.label([attribute.for("rom")], [html.text("Choose a Chip8 ROM:")]),
+        html.input([
+          attribute.type_("file"),
+          attribute.name("rom"),
+          attribute.accept([".ch8", "application/octet-stream"]),
+          event.on("change", decode.map(file_decoder(), UserSelectedRom)),
         ]),
-      ],
-    ),
-  ])
+      ]),
+      tiramisu.renderer(
+        "renderer",
+        [
+          renderer.width(screen_width * 10),
+          renderer.height(screen_height * 10),
+          renderer.on_tick(Tick),
+        ],
+        [
+          tiramisu.scene("scene", [], [
+            tiramisu.camera(
+              "camera",
+              [
+                camera.active(True),
+                camera.orthographic(),
+                camera.left(0.0),
+                camera.right(int.to_float(screen_width)),
+                camera.top(0.0),
+                camera.bottom(int.to_float(screen_height)),
+                camera.near(0.1),
+                camera.far(100.0),
+                transform.position(vec3.Vec3(0.0, 0.0, 20.0)),
+              ],
+              [],
+            ),
+            tiramisu.empty("screen", [], {
+              case model {
+                RomPending -> []
+                RomLoaded(model) -> {
+                  let pixel_geom = primitive.box(vec3.Vec3(1.0, 1.0, 0.0))
+                  iv.index_map(model.system.screen, fn(on, idx) {
+                    let #(x, y) = index_to_coords(idx)
+
+                    tiramisu.primitive(
+                      "pixel-" <> int.to_string(idx),
+                      [
+                        pixel_geom,
+                        material.basic(),
+                        material.color(pixel_state_to_color(on)),
+                        transform.position(vec3.Vec3(x, y, 0.0)),
+                      ],
+                      [],
+                    )
+                  })
+                  |> iv.to_list
+                }
+              }
+            }),
+          ]),
+        ],
+      ),
+    ],
+  )
 }
 
 pub type RomFile

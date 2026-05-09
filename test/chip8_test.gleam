@@ -594,3 +594,68 @@ pub fn skip_not_pressed_not_taken_test() {
   let assert Ok(system) = chip8.run(system)
   assert system.pc == 516
 }
+
+pub fn get_key_waits_test() {
+  // FX0A blocks until a key is released. With key_released = None, PC must
+  // be rewound by 2 so the same instruction re-executes next tick, and Vx
+  // must remain unchanged.
+  let assert Ok(system) = chip8.new_system([0xF0, 0x0A])
+  let system = chip8.System(..system, key_released: None)
+  let assert Ok(system) = chip8.run(system)
+
+  let assert Ok(v0) = dict.get(system.registers, 0)
+  assert system.pc == 512
+  assert v0 == 0
+}
+
+pub fn get_key_received_test() {
+  // FX0A with key_released = Some(7) stores 7 in Vx and advances normally.
+  let assert Ok(system) = chip8.new_system([0xF0, 0x0A])
+  let system = chip8.System(..system, key_released: Some(7))
+  let assert Ok(system) = chip8.run(system)
+
+  let assert Ok(v0) = dict.get(system.registers, 0)
+  assert system.pc == 514
+  assert v0 == 7
+}
+
+pub fn set_reg_to_delay_test() {
+  // FX07 copies the delay timer into Vx.
+  let assert Ok(system) = chip8.new_system([0xF0, 0x07])
+  let system = chip8.System(..system, delay_timer: 42)
+  let assert Ok(system) = chip8.run(system)
+
+  let assert Ok(v0) = dict.get(system.registers, 0)
+  assert v0 == 42
+}
+
+pub fn set_delay_to_reg_test() {
+  // V0 = 42, then FX15 copies V0 into the delay timer.
+  let assert Ok(system) = chip8.new_system([0x60, 0x2A, 0xF0, 0x15])
+  let assert Ok(system) = chip8.run(system)
+  let assert Ok(system) = chip8.run(system)
+
+  assert system.delay_timer == 42
+}
+
+pub fn set_sound_to_reg_test() {
+  // V0 = 42, then FX18 copies V0 into the sound timer.
+  let assert Ok(system) = chip8.new_system([0x60, 0x2A, 0xF0, 0x18])
+  let assert Ok(system) = chip8.run(system)
+  let assert Ok(system) = chip8.run(system)
+
+  assert system.sound_timer == 42
+}
+
+pub fn set_font_char_test() {
+  // V0 = 1, then FX29 sets I to the address of the '1' glyph in the font
+  // table: font_location (80) + 1 * 5 = 85. The first byte of the '1' glyph
+  // is 0x20.
+  let assert Ok(system) = chip8.new_system([0x60, 0x01, 0xF0, 0x29])
+  let assert Ok(system) = chip8.run(system)
+  let assert Ok(system) = chip8.run(system)
+
+  let assert Ok(font_byte) = iv.get(system.memory, system.index_register)
+  assert system.index_register == 85
+  assert font_byte == 0x20
+}
