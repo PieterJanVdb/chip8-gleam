@@ -1,6 +1,8 @@
 import chip8
 import gleam/dict
+import gleam/int
 import gleam/list
+import gleam/option.{None, Some}
 import gleeunit
 import iv
 
@@ -235,7 +237,7 @@ pub fn display_wraps_starting_position_test() {
 
 pub fn decode_unknown_opcode_test() {
   let assert Ok(system) = chip8.new_system([0xFF, 0xFF])
-  assert chip8.run(system) == Error(chip8.DecodeError)
+  assert chip8.run(system) == Error(chip8.DecodeError(<<0xFF, 0xFF>>))
 }
 
 pub fn call_test() {
@@ -270,8 +272,7 @@ pub fn set_x_to_y_test() {
 
 pub fn or_test() {
   // V0 = 0xAA, V1 = 0xF0, then V0 |= V1 → 0xFA
-  let assert Ok(system) =
-    chip8.new_system([0x60, 0xAA, 0x61, 0xF0, 0x80, 0x11])
+  let assert Ok(system) = chip8.new_system([0x60, 0xAA, 0x61, 0xF0, 0x80, 0x11])
   let assert Ok(system) = chip8.run(system)
   let assert Ok(system) = chip8.run(system)
   let assert Ok(system) = chip8.run(system)
@@ -281,8 +282,7 @@ pub fn or_test() {
 
 pub fn and_test() {
   // V0 = 0xAA, V1 = 0xF0, then V0 &= V1 → 0xA0
-  let assert Ok(system) =
-    chip8.new_system([0x60, 0xAA, 0x61, 0xF0, 0x80, 0x12])
+  let assert Ok(system) = chip8.new_system([0x60, 0xAA, 0x61, 0xF0, 0x80, 0x12])
   let assert Ok(system) = chip8.run(system)
   let assert Ok(system) = chip8.run(system)
   let assert Ok(system) = chip8.run(system)
@@ -292,8 +292,7 @@ pub fn and_test() {
 
 pub fn xor_test() {
   // V0 = 0xAA, V1 = 0xF0, then V0 ^= V1 → 0x5A
-  let assert Ok(system) =
-    chip8.new_system([0x60, 0xAA, 0x61, 0xF0, 0x80, 0x13])
+  let assert Ok(system) = chip8.new_system([0x60, 0xAA, 0x61, 0xF0, 0x80, 0x13])
   let assert Ok(system) = chip8.run(system)
   let assert Ok(system) = chip8.run(system)
   let assert Ok(system) = chip8.run(system)
@@ -303,8 +302,7 @@ pub fn xor_test() {
 
 pub fn add_y_to_x_test() {
   // V0 = 5, V1 = 3, then V0 += V1 → 8, VF = 0
-  let assert Ok(system) =
-    chip8.new_system([0x60, 0x05, 0x61, 0x03, 0x80, 0x14])
+  let assert Ok(system) = chip8.new_system([0x60, 0x05, 0x61, 0x03, 0x80, 0x14])
   let assert Ok(system) = chip8.run(system)
   let assert Ok(system) = chip8.run(system)
   let assert Ok(system) = chip8.run(system)
@@ -316,8 +314,7 @@ pub fn add_y_to_x_test() {
 
 pub fn add_y_to_x_overflow_test() {
   // V0 = 0xFF, V1 = 1, then V0 += V1 → 0, VF = 1 (8XY4 sets VF, unlike 7XNN)
-  let assert Ok(system) =
-    chip8.new_system([0x60, 0xFF, 0x61, 0x01, 0x80, 0x14])
+  let assert Ok(system) = chip8.new_system([0x60, 0xFF, 0x61, 0x01, 0x80, 0x14])
   let assert Ok(system) = chip8.run(system)
   let assert Ok(system) = chip8.run(system)
   let assert Ok(system) = chip8.run(system)
@@ -329,8 +326,7 @@ pub fn add_y_to_x_overflow_test() {
 
 pub fn sub_y_from_x_test() {
   // V0 = 5, V1 = 3, then V0 -= V1 → 2, VF = 1 (no borrow)
-  let assert Ok(system) =
-    chip8.new_system([0x60, 0x05, 0x61, 0x03, 0x80, 0x15])
+  let assert Ok(system) = chip8.new_system([0x60, 0x05, 0x61, 0x03, 0x80, 0x15])
   let assert Ok(system) = chip8.run(system)
   let assert Ok(system) = chip8.run(system)
   let assert Ok(system) = chip8.run(system)
@@ -342,8 +338,7 @@ pub fn sub_y_from_x_test() {
 
 pub fn sub_y_from_x_underflow_test() {
   // V0 = 3, V1 = 5, then V0 -= V1 → 254, VF = 0 (borrow)
-  let assert Ok(system) =
-    chip8.new_system([0x60, 0x03, 0x61, 0x05, 0x80, 0x15])
+  let assert Ok(system) = chip8.new_system([0x60, 0x03, 0x61, 0x05, 0x80, 0x15])
   let assert Ok(system) = chip8.run(system)
   let assert Ok(system) = chip8.run(system)
   let assert Ok(system) = chip8.run(system)
@@ -355,8 +350,7 @@ pub fn sub_y_from_x_underflow_test() {
 
 pub fn sub_x_from_y_test() {
   // V0 = 3, V1 = 5, then V0 = V1 - V0 → 2, VF = 1 (no borrow)
-  let assert Ok(system) =
-    chip8.new_system([0x60, 0x03, 0x61, 0x05, 0x80, 0x17])
+  let assert Ok(system) = chip8.new_system([0x60, 0x03, 0x61, 0x05, 0x80, 0x17])
   let assert Ok(system) = chip8.run(system)
   let assert Ok(system) = chip8.run(system)
   let assert Ok(system) = chip8.run(system)
@@ -368,8 +362,7 @@ pub fn sub_x_from_y_test() {
 
 pub fn sub_x_from_y_underflow_test() {
   // V0 = 5, V1 = 3, then V0 = V1 - V0 → 254, VF = 0 (borrow)
-  let assert Ok(system) =
-    chip8.new_system([0x60, 0x05, 0x61, 0x03, 0x80, 0x17])
+  let assert Ok(system) = chip8.new_system([0x60, 0x05, 0x61, 0x03, 0x80, 0x17])
   let assert Ok(system) = chip8.run(system)
   let assert Ok(system) = chip8.run(system)
   let assert Ok(system) = chip8.run(system)
@@ -421,4 +414,183 @@ pub fn shift_left_msb_set_test() {
   let assert Ok(vf) = dict.get(system.registers, 15)
   assert v0 == 0x5A
   assert vf == 1
+}
+
+pub fn store_test() {
+  // V0..V3 = 0x11, 0x22, 0x33, 0x44; I = 0x300; FX55 with X=3 writes V0..V3
+  // (inclusive) to memory[I..I+3].
+  let assert Ok(system) =
+    chip8.new_system([
+      0x60, 0x11, 0x61, 0x22, 0x62, 0x33, 0x63, 0x44, 0xA3, 0x00, 0xF3, 0x55,
+    ])
+  let assert Ok(system) = chip8.run(system)
+  let assert Ok(system) = chip8.run(system)
+  let assert Ok(system) = chip8.run(system)
+  let assert Ok(system) = chip8.run(system)
+  let assert Ok(system) = chip8.run(system)
+  let assert Ok(system) = chip8.run(system)
+
+  let assert Ok(m0) = iv.get(system.memory, 0x300)
+  let assert Ok(m1) = iv.get(system.memory, 0x301)
+  let assert Ok(m2) = iv.get(system.memory, 0x302)
+  let assert Ok(m3) = iv.get(system.memory, 0x303)
+  assert m0 == 0x11
+  assert m1 == 0x22
+  assert m2 == 0x33
+  assert m3 == 0x44
+
+  // V4 is outside the range — its slot in memory must remain untouched.
+  let assert Ok(m4) = iv.get(system.memory, 0x304)
+  assert m4 == 0
+}
+
+pub fn load_test() {
+  // I = 0x50 (font '0' glyph: F0 90 90 90 F0); FX65 with X=4 loads V0..V4
+  // (inclusive) from memory[I..I+4].
+  let assert Ok(system) = chip8.new_system([0xA0, 0x50, 0xF4, 0x65])
+  let assert Ok(system) = chip8.run(system)
+  let assert Ok(system) = chip8.run(system)
+
+  let assert Ok(v0) = dict.get(system.registers, 0)
+  let assert Ok(v1) = dict.get(system.registers, 1)
+  let assert Ok(v2) = dict.get(system.registers, 2)
+  let assert Ok(v3) = dict.get(system.registers, 3)
+  let assert Ok(v4) = dict.get(system.registers, 4)
+  assert v0 == 0xF0
+  assert v1 == 0x90
+  assert v2 == 0x90
+  assert v3 == 0x90
+  assert v4 == 0xF0
+
+  // V5 is outside the range — must remain at its initial value of 0.
+  let assert Ok(v5) = dict.get(system.registers, 5)
+  assert v5 == 0
+}
+
+pub fn store_decimal_test() {
+  // V0 = 156 (0x9C); I = 0x300; FX33 writes BCD digits to memory[I..I+2].
+  let assert Ok(system) = chip8.new_system([0x60, 0x9C, 0xA3, 0x00, 0xF0, 0x33])
+  let assert Ok(system) = chip8.run(system)
+  let assert Ok(system) = chip8.run(system)
+  let assert Ok(system) = chip8.run(system)
+
+  let assert Ok(m0) = iv.get(system.memory, 0x300)
+  let assert Ok(m1) = iv.get(system.memory, 0x301)
+  let assert Ok(m2) = iv.get(system.memory, 0x302)
+  assert m0 == 1
+  assert m1 == 5
+  assert m2 == 6
+}
+
+pub fn store_decimal_leading_zeros_test() {
+  // V0 = 7; FX33 must still write three digits, padding with leading zeros.
+  let assert Ok(system) = chip8.new_system([0x60, 0x07, 0xA3, 0x00, 0xF0, 0x33])
+  let assert Ok(system) = chip8.run(system)
+  let assert Ok(system) = chip8.run(system)
+  let assert Ok(system) = chip8.run(system)
+
+  let assert Ok(m0) = iv.get(system.memory, 0x300)
+  let assert Ok(m1) = iv.get(system.memory, 0x301)
+  let assert Ok(m2) = iv.get(system.memory, 0x302)
+  assert m0 == 0
+  assert m1 == 0
+  assert m2 == 7
+}
+
+pub fn add_idx_test() {
+  // I = 0x100, V0 = 0x05, then I += V0 → I = 0x105, VF = 0 (no overflow)
+  let assert Ok(system) = chip8.new_system([0xA1, 0x00, 0x60, 0x05, 0xF0, 0x1E])
+  let assert Ok(system) = chip8.run(system)
+  let assert Ok(system) = chip8.run(system)
+  let assert Ok(system) = chip8.run(system)
+
+  let assert Ok(vf) = dict.get(system.registers, 15)
+  assert system.index_register == 0x105
+  assert vf == 0
+}
+
+pub fn add_idx_overflow_test() {
+  // I = 0xFFF, V0 = 0x10, then I += V0 → I = 0x100F, VF = 1 (Amiga quirk:
+  // VF set when I + VX leaves the 12-bit address space). I is not masked.
+  let assert Ok(system) = chip8.new_system([0xAF, 0xFF, 0x60, 0x10, 0xF0, 0x1E])
+  let assert Ok(system) = chip8.run(system)
+  let assert Ok(system) = chip8.run(system)
+  let assert Ok(system) = chip8.run(system)
+
+  let assert Ok(vf) = dict.get(system.registers, 15)
+  assert system.index_register == 0x100F
+  assert vf == 1
+}
+
+pub fn jump_offset_test() {
+  // V0 = 0x05, then BNNN with NNN=0x300 → PC = 0x300 + V0 = 0x305
+  let assert Ok(system) = chip8.new_system([0x60, 0x05, 0xB3, 0x00])
+  let assert Ok(system) = chip8.run(system)
+  let assert Ok(system) = chip8.run(system)
+
+  assert system.pc == 0x305
+}
+
+pub fn random_masked_to_zero_test() {
+  // CXNN ANDs the random byte with NN. With NN=0 the result is always 0,
+  // regardless of the random sample — guards against forgetting the mask.
+  let assert Ok(system) = chip8.new_system([0xC0, 0x00])
+  let assert Ok(system) = chip8.run(system)
+
+  let assert Ok(v0) = dict.get(system.registers, 0)
+  assert v0 == 0
+}
+
+pub fn random_bounded_test() {
+  // CXNN with NN=0x0F must always produce a value in 0..15. Run 32 times
+  // back-to-back so a buggy "ignore the mask" path is very likely to escape
+  // the bound at least once.
+  let rom = list.flatten(list.repeat([0xC0, 0x0F], 32))
+  let assert Ok(system) = chip8.new_system(rom)
+
+  int.range(from: 0, to: 32, with: system, run: fn(system, _) {
+    let assert Ok(system) = chip8.run(system)
+    let assert Ok(v0) = dict.get(system.registers, 0)
+    assert v0 >= 0
+    assert v0 <= 0x0F
+    system
+  })
+  Nil
+}
+
+pub fn skip_pressed_taken_test() {
+  // V0 = 5, key 5 is pressed; EX9E should skip → PC = 518
+  let assert Ok(system) = chip8.new_system([0x60, 0x05, 0xE0, 0x9E])
+  let system = chip8.System(..system, key_pressed: Some(5))
+  let assert Ok(system) = chip8.run(system)
+  let assert Ok(system) = chip8.run(system)
+  assert system.pc == 518
+}
+
+pub fn skip_pressed_not_taken_test() {
+  // V0 = 5, key 7 is pressed (different key); EX9E should not skip → PC = 516.
+  // Validates that the comparison checks the key value, not just Some/None.
+  let assert Ok(system) = chip8.new_system([0x60, 0x05, 0xE0, 0x9E])
+  let system = chip8.System(..system, key_pressed: Some(7))
+  let assert Ok(system) = chip8.run(system)
+  let assert Ok(system) = chip8.run(system)
+  assert system.pc == 516
+}
+
+pub fn skip_not_pressed_taken_test() {
+  // V0 = 5, no key pressed; EXA1 should skip → PC = 518
+  let assert Ok(system) = chip8.new_system([0x60, 0x05, 0xE0, 0xA1])
+  let system = chip8.System(..system, key_pressed: None)
+  let assert Ok(system) = chip8.run(system)
+  let assert Ok(system) = chip8.run(system)
+  assert system.pc == 518
+}
+
+pub fn skip_not_pressed_not_taken_test() {
+  // V0 = 5, key 5 is pressed; EXA1 should not skip → PC = 516
+  let assert Ok(system) = chip8.new_system([0x60, 0x05, 0xE0, 0xA1])
+  let system = chip8.System(..system, key_pressed: Some(5))
+  let assert Ok(system) = chip8.run(system)
+  let assert Ok(system) = chip8.run(system)
+  assert system.pc == 516
 }

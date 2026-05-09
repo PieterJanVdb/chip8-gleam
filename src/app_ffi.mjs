@@ -10,3 +10,7 @@ export async function readBytes(file) {
   return toList(new Uint8Array(buffer));
 }
 
+export function registerKeyHandlers(on_keydown, on_keyup) {
+  document.addEventListener('keydown', (event) => on_keydown(event.code))
+  document.addEventListener('keyup', (event) => on_keyup(event.code))
+}

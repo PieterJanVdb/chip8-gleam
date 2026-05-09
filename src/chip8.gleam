@@ -6,6 +6,7 @@ import gleam/float
 import gleam/int
 import gleam/javascript/promise.{type Promise}
 import gleam/list
+import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/time/duration
 import iv
@@ -141,7 +142,7 @@ const font = [
 
 pub type SystemError {
   FetchError
-  DecodeError
+  DecodeError(BitArray)
   RegisterNotFoundError
   ScreenOutOfBoundsError
   MemoryOutOfBoundsError
@@ -159,12 +160,9 @@ pub type System {
     delay_timer: Int,
     sound_timer: Int,
     registers: dict.Dict(Int, Int),
+    key_pressed: Option(Int),
+    key_released: Option(Int),
   )
-}
-
-pub type DecrementPosition {
-  Minuend
-  Subtrahend
 }
 
 pub type ShiftDirection {
@@ -176,10 +174,12 @@ pub type Instruction {
   Clear
   Call(address: Int)
   Jump(address: Int)
+  JumpOffset(address: Int)
   Return
   SetRegToVal(reg: Int, value: Int)
   AddValToReg(reg: Int, value: Int)
   SetIdx(address: Int)
+  AddIdx(reg: Int)
   Display(reg_x: Int, reg_y: Int, height: Int)
   SkipValEq(reg: Int, value: Int, equality: Bool)
   SkipRegEq(reg_x: Int, reg_y: Int, equality: Bool)
@@ -191,6 +191,17 @@ pub type Instruction {
   SubYFromX(reg_x: Int, reg_y: Int)
   SubXFromY(reg_x: Int, reg_y: Int)
   Shift(reg_x: Int, to: ShiftDirection)
+  Store(reg: Int)
+  Load(reg: Int)
+  Bcd(reg: Int)
+  Random(reg: Int, value: Int)
+  SkipPressed(reg: Int)
+  SkipNotPressed(reg: Int)
+  GetKey(reg: Int)
+  SetRegToDelay(reg: Int)
+  SetDelayToReg(reg: Int)
+  SetSoundToReg(reg: Int)
+  SetFontChar(reg: Int)
 }
 
 // SYSTEM
@@ -225,6 +236,8 @@ pub fn new_system(rom: List(Int)) -> Result(System, SystemError) {
       dict.insert(acc, i, 0)
     }),
     memory:,
+    key_pressed: None,
+    key_released: None,
   ))
 }
 
@@ -267,57 +280,78 @@ fn set_register(
   Ok(dict.insert(registers, reg, to))
 }
 
-fn inc_register(
+fn get_register_range(
   registers: dict.Dict(Int, Int),
-  reg reg: Int,
-  with with: Int,
-  set_flag set_flag: Bool,
+  size size: Int,
+) -> Result(List(Int), SystemError) {
+  int.range(from: size - 1, to: -1, with: [], run: fn(range, reg) {
+    [dict.get(registers, reg), ..range]
+  })
+  |> result.all()
+  |> result.replace_error(RegisterNotFoundError)
+}
+
+fn store_register_range(
+  registers: dict.Dict(Int, Int),
+  range range: List(Int),
 ) -> Result(dict.Dict(Int, Int), SystemError) {
-  use current <- result.try(get_register(registers, reg))
-  let result = current + with
-  use registers <- result.try(set_register(
-    registers,
-    reg,
-    int.bitwise_and(result, 0xFF),
-  ))
+  list.index_map(range, fn(val, i) { #(val, i) })
+  |> list.try_fold(from: registers, with: fn(acc, x) {
+    let #(val, i) = x
+    set_register(acc, reg: i, to: val)
+  })
+}
 
-  use <- bool.guard(when: !set_flag, return: Ok(registers))
+fn get_memory_range(memory: iv.Array(Int), from from: Int, size size: Int) {
+  iv.slice(from: memory, start: from, size:)
+  |> result.map(iv.to_list)
+  |> result.replace_error(MemoryOutOfBoundsError)
+}
 
-  // Set flag to 1 when result has overflowed, otherwise 0
-  let flag = case result > 255 {
+fn store_memory_range(
+  memory: iv.Array(Int),
+  from from: Int,
+  range range: List(Int),
+) {
+  list.index_map(range, fn(val, i) { #(val, i) })
+  |> list.try_fold(from: memory, with: fn(acc, x) {
+    let #(val, i) = x
+    iv.set(in: acc, at: from + i, to: val)
+    |> result.replace_error(MemoryOutOfBoundsError)
+  })
+}
+
+fn wrap_byte(n: Int) -> Int {
+  int.bitwise_and(n, 0xFF)
+}
+
+fn carry_flag(n: Int) -> Int {
+  case n > 255 {
     True -> 1
     False -> 0
   }
-
-  set_register(registers, reg_vf, flag)
 }
 
-fn decr_register(
-  registers: dict.Dict(Int, Int),
-  reg reg: Int,
-  with with: Int,
-  reg_position reg_position: DecrementPosition,
-) -> Result(dict.Dict(Int, Int), SystemError) {
-  use current <- result.try(get_register(registers, reg))
-
-  let result = case reg_position {
-    Minuend -> current - with
-    Subtrahend -> with - current
-  }
-
-  use registers <- result.try(set_register(
-    registers,
-    reg,
-    { result + 256 } % 256,
-  ))
-
-  // Set flag to 0 when result has underflowed, otherwise 1
-  let flag = case result < 0 {
+fn borrow_flag(n: Int) -> Int {
+  case n < 0 {
     True -> 0
     False -> 1
   }
+}
 
-  set_register(registers, reg_vf, flag)
+fn write_arith(
+  system: System,
+  reg reg: Int,
+  raw raw: Int,
+  flag flag: fn(Int) -> Int,
+) -> Result(System, SystemError) {
+  use registers <- result.try(set_register(
+    system.registers,
+    reg,
+    wrap_byte(raw),
+  ))
+  use registers <- result.try(set_register(registers, reg_vf, flag(raw)))
+  Ok(System(..system, registers:))
 }
 
 fn display(
@@ -439,26 +473,52 @@ fn decode(instruction_arr: BitArray) -> Result(Instruction, SystemError) {
     // 2NNN
     <<0x2:4, address:12>> -> Ok(Call(address:))
     // 3XNN
-    <<0x3:4, reg:4, value>> -> Ok(SkipValEq(reg:, value:, equality: True))
+    <<0x3:4, reg:4, value:8>> -> Ok(SkipValEq(reg:, value:, equality: True))
     // 4XNN
-    <<0x4:4, reg:4, value>> -> Ok(SkipValEq(reg:, value:, equality: False))
+    <<0x4:4, reg:4, value:8>> -> Ok(SkipValEq(reg:, value:, equality: False))
     // 5XY0
     <<0x5:4, reg_x:4, reg_y:4, 0x0:4>> ->
       Ok(SkipRegEq(reg_x:, reg_y:, equality: True))
     // 6XNN
-    <<0x6:4, reg:4, value>> -> Ok(SetRegToVal(reg:, value:))
+    <<0x6:4, reg:4, value:8>> -> Ok(SetRegToVal(reg:, value:))
     // 7XNN
-    <<0x7:4, reg:4, value>> -> Ok(AddValToReg(reg:, value:))
+    <<0x7:4, reg:4, value:8>> -> Ok(AddValToReg(reg:, value:))
     // 9XY0
     <<0x9:4, reg_x:4, reg_y:4, 0x0:4>> ->
       Ok(SkipRegEq(reg_x:, reg_y:, equality: False))
     // ANNN
     <<0xA:4, address:12>> -> Ok(SetIdx(address:))
+    // BNNN
+    <<0xB:4, address:12>> -> Ok(JumpOffset(address:))
+    // CXNN
+    <<0xC:4, reg:4, value:8>> -> Ok(Random(reg:, value:))
     // DXYN
     <<0xD:4, reg_x:4, reg_y:4, height:4>> ->
       Ok(Display(reg_x:, reg_y:, height:))
+    // EX9E
+    <<0xE:4, reg:4, 0x9:4, 0xE:4>> -> Ok(SkipPressed(reg:))
+    // EXA1
+    <<0xE:4, reg:4, 0xA:4, 0x1:4>> -> Ok(SkipNotPressed(reg:))
+    // FX07
+    <<0xF:4, reg:4, 0x0:4, 0x7:4>> -> Ok(SetRegToDelay(reg:))
+    // FX15
+    <<0xF:4, reg:4, 0x1:4, 0x5:4>> -> Ok(SetDelayToReg(reg:))
+    // FX18
+    <<0xF:4, reg:4, 0x1:4, 0x8:4>> -> Ok(SetSoundToReg(reg:))
+    // FX1E
+    <<0xF:4, reg:4, 0x1:4, 0xE:4>> -> Ok(AddIdx(reg:))
+    // FX29
+    <<0xF:4, reg:4, 0x2:4, 0x9:4>> -> Ok(SetFontChar(reg:))
+    // FX33
+    <<0xF:4, reg:4, 0x3:4, 0x3:4>> -> Ok(Bcd(reg:))
+    // FX55
+    <<0xF:4, reg:4, 0x5:4, 0x5:4>> -> Ok(Store(reg:))
+    // FX65
+    <<0xF:4, reg:4, 0x6:4, 0x5:4>> -> Ok(Load(reg:))
+    // FX0A
+    <<0xF:4, reg:4, 0x0:4, 0xA:4>> -> Ok(GetKey(reg:))
     // 8XY_ Logical and arithmetic instructions
-    <<0x8:4, reg_x:4, reg_y:4, op:4>> -> {
+    <<0x8:4, reg_x:4, reg_y:4, op:4>> as instr -> {
       case op {
         0x0 -> Ok(SetXToY(reg_x:, reg_y:))
         0x1 -> Ok(Or(reg_x:, reg_y:))
@@ -469,10 +529,10 @@ fn decode(instruction_arr: BitArray) -> Result(Instruction, SystemError) {
         0x6 -> Ok(Shift(reg_x:, to: ShiftRight))
         0x7 -> Ok(SubXFromY(reg_x:, reg_y:))
         0xE -> Ok(Shift(reg_x:, to: ShiftLeft))
-        _ -> Error(DecodeError)
+        _ -> Error(DecodeError(instr))
       }
     }
-    _ -> Error(DecodeError)
+    instr -> Error(DecodeError(instr))
   }
 }
 
@@ -504,11 +564,11 @@ fn execute(
       Ok(System(..system, registers:))
     }
     AddValToReg(reg:, value:) -> {
-      use registers <- result.try(inc_register(
+      use vx <- result.try(get_register(system.registers, reg))
+      use registers <- result.try(set_register(
         system.registers,
-        reg:,
-        with: value,
-        set_flag: False,
+        reg,
+        wrap_byte(vx + value),
       ))
       Ok(System(..system, registers:))
     }
@@ -567,34 +627,19 @@ fn execute(
       Ok(System(..system, registers:))
     }
     AddYToX(reg_x:, reg_y:) -> {
+      use vx <- result.try(get_register(system.registers, reg_x))
       use vy <- result.try(get_register(system.registers, reg_y))
-      use registers <- result.try(inc_register(
-        system.registers,
-        reg: reg_x,
-        with: vy,
-        set_flag: True,
-      ))
-      Ok(System(..system, registers:))
+      write_arith(system, reg: reg_x, raw: vx + vy, flag: carry_flag)
     }
     SubYFromX(reg_x:, reg_y:) -> {
+      use vx <- result.try(get_register(system.registers, reg_x))
       use vy <- result.try(get_register(system.registers, reg_y))
-      use registers <- result.try(decr_register(
-        system.registers,
-        reg: reg_x,
-        with: vy,
-        reg_position: Minuend,
-      ))
-      Ok(System(..system, registers:))
+      write_arith(system, reg: reg_x, raw: vx - vy, flag: borrow_flag)
     }
     SubXFromY(reg_x:, reg_y:) -> {
+      use vx <- result.try(get_register(system.registers, reg_x))
       use vy <- result.try(get_register(system.registers, reg_y))
-      use registers <- result.try(decr_register(
-        system.registers,
-        reg: reg_x,
-        with: vy,
-        reg_position: Subtrahend,
-      ))
-      Ok(System(..system, registers:))
+      write_arith(system, reg: reg_x, raw: vy - vx, flag: borrow_flag)
     }
     Shift(reg_x:, to:) -> {
       use vx <- result.try(get_register(system.registers, reg_x))
@@ -625,6 +670,120 @@ fn execute(
           Ok(System(..system, registers:))
         }
       }
+    }
+    Store(reg:) -> {
+      use range <- result.try(get_register_range(
+        system.registers,
+        size: reg + 1,
+      ))
+      use memory <- result.try(store_memory_range(
+        system.memory,
+        from: system.index_register,
+        range:,
+      ))
+
+      Ok(System(..system, memory:))
+    }
+    Load(reg:) -> {
+      use range <- result.try(get_memory_range(
+        system.memory,
+        from: system.index_register,
+        size: reg + 1,
+      ))
+      use registers <- result.try(store_register_range(system.registers, range:))
+      Ok(System(..system, registers:))
+    }
+    Bcd(reg:) -> {
+      use vx <- result.try(get_register(system.registers, reg:))
+
+      let hundreds = vx / 100
+      let tens = vx / 10 % 10
+      let ones = vx % 10
+
+      use memory <- result.try(
+        store_memory_range(system.memory, from: system.index_register, range: [
+          hundreds,
+          tens,
+          ones,
+        ]),
+      )
+
+      Ok(System(..system, memory:))
+    }
+    AddIdx(reg:) -> {
+      use vx <- result.try(get_register(system.registers, reg:))
+      let sum = system.index_register + vx
+
+      use registers <- result.try(
+        set_register(system.registers, reg_vf, case sum > 0xFFF {
+          True -> 1
+          False -> 0
+        }),
+      )
+
+      Ok(System(..system, index_register: sum, registers:))
+    }
+    JumpOffset(address:) -> {
+      use offset <- result.try(get_register(system.registers, reg: 0))
+      Ok(System(..system, pc: address + offset))
+    }
+    Random(reg:, value:) -> {
+      use registers <- result.try(set_register(
+        system.registers,
+        reg:,
+        to: int.random(255) |> int.bitwise_and(value),
+      ))
+      Ok(System(..system, registers:))
+    }
+    SkipPressed(reg:) -> {
+      use vkey <- result.try(get_register(system.registers, reg:))
+
+      case system.key_pressed {
+        Some(key) if key == vkey -> Ok(System(..system, pc: system.pc + 2))
+        _ -> Ok(system)
+      }
+    }
+    SkipNotPressed(reg:) -> {
+      use vkey <- result.try(get_register(system.registers, reg:))
+
+      case system.key_pressed {
+        Some(key) if key == vkey -> Ok(system)
+        _ -> Ok(System(..system, pc: system.pc + 2))
+      }
+    }
+    GetKey(reg:) -> {
+      case system.key_released {
+        Some(key) -> {
+          echo key
+          use registers <- result.try(set_register(
+            system.registers,
+            reg:,
+            to: key,
+          ))
+          Ok(System(..system, registers:))
+        }
+        _ -> Ok(System(..system, pc: system.pc - 2))
+      }
+    }
+    SetRegToDelay(reg:) -> {
+      use registers <- result.try(set_register(
+        system.registers,
+        reg:,
+        to: system.delay_timer,
+      ))
+      Ok(System(..system, registers:))
+    }
+    SetDelayToReg(reg:) -> {
+      use vx <- result.try(get_register(system.registers, reg:))
+      Ok(System(..system, delay_timer: vx))
+    }
+    SetSoundToReg(reg:) -> {
+      use vx <- result.try(get_register(system.registers, reg:))
+      Ok(System(..system, sound_timer: vx))
+    }
+    SetFontChar(reg:) -> {
+      use vx <- result.try(get_register(system.registers, reg:))
+      Ok(System(..system, index_register: font_location + vx * 5))
     }
   }
 }
@@ -662,6 +821,8 @@ pub type Msg {
   Tick(renderer.Tick)
   UserSelectedRom(RomFile)
   RomFileRead(List(Int))
+  UserPressedKey(String)
+  UserReleasedKey(String)
 }
 
 pub fn main() -> Nil {
@@ -672,7 +833,7 @@ pub fn main() -> Nil {
 }
 
 fn init(_flags: Nil) -> #(Model, Effect(Msg)) {
-  #(init_model(), effect.none())
+  #(init_model(), register_key_handlers())
 }
 
 fn init_model() -> Model {
@@ -695,6 +856,28 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           effect.none(),
         )
         Error(_) -> #(model, effect.none())
+      }
+    }
+    UserPressedKey(code) -> {
+      case model {
+        RomLoaded(model) -> {
+          case code_to_key(code) {
+            Ok(key) -> #(RomLoaded(key_pressed(model, key)), effect.none())
+            Error(_) -> #(RomLoaded(model), effect.none())
+          }
+        }
+        RomPending -> #(model, effect.none())
+      }
+    }
+    UserReleasedKey(code) -> {
+      case model {
+        RomLoaded(model) -> {
+          case code_to_key(code) {
+            Ok(key) -> #(RomLoaded(key_released(model, key)), effect.none())
+            Error(_) -> #(RomLoaded(model), effect.none())
+          }
+        }
+        RomPending -> #(model, effect.none())
       }
     }
   }
@@ -779,10 +962,10 @@ fn read_rom_file(rom_file: RomFile) -> Effect(Msg) {
   })
 }
 
-@external(javascript, "./file_ffi.mjs", "fileFromOnChange")
+@external(javascript, "./app_ffi.mjs", "fileFromOnChange")
 fn file_from_on_change(event: dynamic.Dynamic) -> Result(RomFile, RomFile)
 
-@external(javascript, "./file_ffi.mjs", "readBytes")
+@external(javascript, "./app_ffi.mjs", "readBytes")
 fn read_bytes(file: RomFile) -> Promise(List(Int))
 
 fn index_to_coords(idx: Int) -> #(Float, Float) {
@@ -809,9 +992,16 @@ fn handle_tick(
   let model = handle_timers(model, delta: tick.delta_time)
 
   case run_n(model.system, n_instructions) {
-    Ok(system) -> #(RomLoaded(RomLoadedModel(..model, system:)), effect.none())
-    // TODO: handle error
-    Error(_) -> #(RomLoaded(model), effect.none())
+    Ok(system) -> #(
+      RomLoaded(
+        RomLoadedModel(..model, system: System(..system, key_released: None)),
+      ),
+      effect.none(),
+    )
+    Error(err) -> {
+      echo err as "Uh oh"
+      #(RomLoaded(model), effect.none())
+    }
   }
 }
 
@@ -840,4 +1030,64 @@ fn handle_timers(
     ),
     accumulator_ms: leftover,
   )
+}
+
+fn register_key_handlers() {
+  effect.from(fn(dispatch) {
+    do_register_key_handlers(
+      fn(code) { dispatch(UserPressedKey(code)) },
+      fn(code) { dispatch(UserReleasedKey(code)) },
+    )
+  })
+}
+
+@external(javascript, "./app_ffi.mjs", "registerKeyHandlers")
+fn do_register_key_handlers(
+  on_keydown: fn(String) -> Nil,
+  on_keyup: fn(String) -> Nil,
+) -> Nil
+
+fn key_pressed(model: RomLoadedModel, key: Int) {
+  RomLoadedModel(
+    ..model,
+    system: System(..model.system, key_pressed: Some(key)),
+  )
+}
+
+fn key_released(model: RomLoadedModel, key: Int) {
+  case model.system.key_pressed {
+    Some(pressed) if pressed == key -> {
+      RomLoadedModel(
+        ..model,
+        system: System(
+          ..model.system,
+          key_pressed: None,
+          key_released: Some(key),
+        ),
+      )
+    }
+    _ -> model
+  }
+}
+
+fn code_to_key(code: String) -> Result(Int, Nil) {
+  case code {
+    "Digit1" -> Ok(0x1)
+    "Digit2" -> Ok(0x2)
+    "Digit3" -> Ok(0x3)
+    "Digit4" -> Ok(0xC)
+    "KeyQ" -> Ok(0x4)
+    "KeyW" -> Ok(0x5)
+    "KeyE" -> Ok(0x6)
+    "KeyR" -> Ok(0xD)
+    "KeyA" -> Ok(0x7)
+    "KeyS" -> Ok(0x8)
+    "KeyD" -> Ok(0x9)
+    "KeyF" -> Ok(0xE)
+    "KeyZ" -> Ok(0xA)
+    "KeyX" -> Ok(0x0)
+    "KeyC" -> Ok(0xB)
+    "KeyV" -> Ok(0xF)
+    _ -> Error(Nil)
+  }
 }
