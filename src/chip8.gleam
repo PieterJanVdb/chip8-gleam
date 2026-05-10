@@ -888,6 +888,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
 }
 
 fn view(model: Model) {
+  let pixel_geom = primitive.box(vec3.Vec3(1.0, 1.0, 0.0))
   html.main(
     [
       attribute.class(
@@ -946,22 +947,27 @@ fn view(model: Model) {
                 case model {
                   RomPending -> []
                   RomLoaded(model) -> {
-                    let pixel_geom = primitive.box(vec3.Vec3(1.0, 1.0, 0.0))
-                    iv.index_map(model.system.screen, fn(on, idx) {
-                      let #(x, y) = index_to_coords(idx)
+                    iv.index_fold(model.system.screen, [], fn(acc, on, idx) {
+                      // let #(x, y) = index_to_coords(idx)
 
-                      tiramisu.primitive(
-                        "pixel-" <> int.to_string(idx),
-                        [
-                          pixel_geom,
-                          material.basic(),
-                          material.color(pixel_state_to_color(on)),
-                          transform.position(vec3.Vec3(x, y, 0.0)),
-                        ],
-                        [],
-                      )
+                      case on {
+                        False -> acc
+                        True -> {
+                          let pixel =
+                            tiramisu.primitive(
+                              "pixel-" <> int.to_string(idx),
+                              [
+                                pixel_geom,
+                                material.basic(),
+                                material.color(pixel_state_to_color(on)),
+                                transform.position(vec3.Vec3(10.0, 10.0, 0.0)),
+                              ],
+                              [],
+                            )
+                          [pixel, ..acc]
+                        }
+                      }
                     })
-                    |> iv.to_list
                   }
                 }
               }),
@@ -973,7 +979,7 @@ fn view(model: Model) {
         html.text("Keys: 1234 / QWER / ASDF / ZXCV"),
       ]),
       html.footer([attribute.class("mt-auto text-lg text-theme-muted")], [
-        html.text("Made by Pieter-Jan"),
+        html.text("Made by Pieter-Jan in Gleam with Lustre & Tiramisu"),
       ]),
     ],
   )
@@ -1065,8 +1071,8 @@ fn handle_timers(
     ..model,
     system: System(
       ..model.system,
-      delay_timer: int.max(0, model.system.delay_timer - 1),
-      sound_timer: int.max(0, model.system.sound_timer - 1),
+      delay_timer: int.max(0, model.system.delay_timer - steps),
+      sound_timer: int.max(0, model.system.sound_timer - steps),
     ),
     accumulator_ms: leftover,
   )
