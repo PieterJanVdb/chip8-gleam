@@ -887,6 +887,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
   }
 }
 
+// The rendering uses a lot of CPU.....
 fn view(model: Model) {
   let pixel_geom = primitive.box(vec3.Vec3(1.0, 1.0, 0.0))
   html.main(
@@ -948,7 +949,7 @@ fn view(model: Model) {
                   RomPending -> []
                   RomLoaded(model) -> {
                     iv.index_fold(model.system.screen, [], fn(acc, on, idx) {
-                      // let #(x, y) = index_to_coords(idx)
+                      let #(x, y) = index_to_coords(idx)
 
                       case on {
                         False -> acc
@@ -960,7 +961,7 @@ fn view(model: Model) {
                                 pixel_geom,
                                 material.basic(),
                                 material.color(pixel_state_to_color(on)),
-                                transform.position(vec3.Vec3(10.0, 10.0, 0.0)),
+                                transform.position(vec3.Vec3(x, y, 0.0)),
                               ],
                               [],
                             )
