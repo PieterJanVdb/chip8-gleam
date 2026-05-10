@@ -18,6 +18,10 @@ jobs:
           gleam-version: "1.15.2"
           rebar3-version: "3"
           # elixir-version: "1"
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.11"
+      - run: bun install
       - run: gleam deps download
       - run: gleam test
       - run: gleam format --check src test
