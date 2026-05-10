@@ -1,20 +1,8 @@
-# chip8
+# CHIP-8
 
-[![Package Version](https://img.shields.io/hexpm/v/chip8)](https://hex.pm/packages/chip8)
-[![Hex Docs](https://img.shields.io/badge/hex-docs-ffaff3)](https://hexdocs.pm/chip8/)
+Emulator written in Gleam with Lustre and Tiramisu!
 
-```sh
-gleam add chip8@1
-```
-```gleam
-import chip8
-
-pub fn main() -> Nil {
-  // TODO: An example of the project in use
-}
-```
-
-Further documentation can be found at <https://hexdocs.pm/chip8>.
+TODO: CPU usage can get pretty wild depending on how many pixels are `on`, gotta optimize that.
 
 ## Development
 
