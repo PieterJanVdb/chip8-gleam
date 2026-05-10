@@ -33,6 +33,12 @@ jobs:
         run: gleam deps download
       - name: Build app
         run: gleam run -m lustre/dev build --minify --outdir=dist
+      - name: Fix asset paths for GitHub Pages
+        run: |
+          sed -i \
+            -e 's|href="/chip8.css"|href="/chip8-gleam/chip8.css"|' \
+            -e 's|src="/chip8.js"|src="/chip8-gleam/chip8.js"|' \
+            dist/index.html
       - name: Setup Pages
         uses: actions/configure-pages@v5
       - name: Upload artifact
