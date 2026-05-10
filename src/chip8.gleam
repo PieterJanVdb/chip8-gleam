@@ -809,7 +809,7 @@ fn run_n(system: System, n: Int) -> Result(System, SystemError) {
 // LUSTRE / TIRAMISU
 
 pub type RomLoadedModel {
-  RomLoadedModel(system: System, accumulator_ms: Float)
+  RomLoadedModel(system: System, accumulator_ms: Float, beeper: Beeper)
 }
 
 pub type Model {
@@ -852,7 +852,11 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     RomFileRead(bytes) -> {
       case new_system(bytes) {
         Ok(system) -> #(
-          RomLoaded(RomLoadedModel(system:, accumulator_ms: 0.0)),
+          RomLoaded(RomLoadedModel(
+            system:,
+            accumulator_ms: 0.0,
+            beeper: create_beeper(),
+          )),
           effect.none(),
         )
         Error(_) -> #(model, effect.none())
@@ -922,50 +926,46 @@ fn view(model: Model) {
             renderer.on_tick(Tick),
           ],
           [
-            tiramisu.scene(
-              "scene",
-              [scene.background_color(0x1A1816)],
-              [
-                tiramisu.camera(
-                  "camera",
-                  [
-                    camera.active(True),
-                    camera.orthographic(),
-                    camera.left(0.0),
-                    camera.right(int.to_float(screen_width)),
-                    camera.top(0.0),
-                    camera.bottom(int.to_float(screen_height)),
-                    camera.near(0.1),
-                    camera.far(100.0),
-                    transform.position(vec3.Vec3(0.0, 0.0, 20.0)),
-                  ],
-                  [],
-                ),
-                tiramisu.empty("screen", [], {
-                  case model {
-                    RomPending -> []
-                    RomLoaded(model) -> {
-                      let pixel_geom = primitive.box(vec3.Vec3(1.0, 1.0, 0.0))
-                      iv.index_map(model.system.screen, fn(on, idx) {
-                        let #(x, y) = index_to_coords(idx)
+            tiramisu.scene("scene", [scene.background_color(0x1A1816)], [
+              tiramisu.camera(
+                "camera",
+                [
+                  camera.active(True),
+                  camera.orthographic(),
+                  camera.left(0.0),
+                  camera.right(int.to_float(screen_width)),
+                  camera.top(0.0),
+                  camera.bottom(int.to_float(screen_height)),
+                  camera.near(0.1),
+                  camera.far(100.0),
+                  transform.position(vec3.Vec3(0.0, 0.0, 20.0)),
+                ],
+                [],
+              ),
+              tiramisu.empty("screen", [], {
+                case model {
+                  RomPending -> []
+                  RomLoaded(model) -> {
+                    let pixel_geom = primitive.box(vec3.Vec3(1.0, 1.0, 0.0))
+                    iv.index_map(model.system.screen, fn(on, idx) {
+                      let #(x, y) = index_to_coords(idx)
 
-                        tiramisu.primitive(
-                          "pixel-" <> int.to_string(idx),
-                          [
-                            pixel_geom,
-                            material.basic(),
-                            material.color(pixel_state_to_color(on)),
-                            transform.position(vec3.Vec3(x, y, 0.0)),
-                          ],
-                          [],
-                        )
-                      })
-                      |> iv.to_list
-                    }
+                      tiramisu.primitive(
+                        "pixel-" <> int.to_string(idx),
+                        [
+                          pixel_geom,
+                          material.basic(),
+                          material.color(pixel_state_to_color(on)),
+                          transform.position(vec3.Vec3(x, y, 0.0)),
+                        ],
+                        [],
+                      )
+                    })
+                    |> iv.to_list
                   }
-                }),
-              ],
-            ),
+                }
+              }),
+            ]),
           ],
         ),
       ]),
@@ -1024,12 +1024,19 @@ fn handle_tick(
   let model = handle_timers(model, delta: tick.delta_time)
 
   case run_n(model.system, n_instructions) {
-    Ok(system) -> #(
-      RomLoaded(
-        RomLoadedModel(..model, system: System(..system, key_released: None)),
-      ),
-      effect.none(),
-    )
+    Ok(system) -> {
+      let _ = case model.system.sound_timer > 0 {
+        True -> start_beeper(model.beeper)
+        False -> stop_beeper(model.beeper)
+      }
+
+      #(
+        RomLoaded(
+          RomLoadedModel(..model, system: System(..system, key_released: None)),
+        ),
+        effect.none(),
+      )
+    }
     Error(err) -> {
       echo err as "Uh oh"
       #(RomLoaded(model), effect.none())
@@ -1055,6 +1062,7 @@ fn handle_timers(
   let leftover = acc -. int.to_float(steps) *. delay_timer_step_ms
 
   RomLoadedModel(
+    ..model,
     system: System(
       ..model.system,
       delay_timer: int.max(0, model.system.delay_timer - 1),
@@ -1063,6 +1071,17 @@ fn handle_timers(
     accumulator_ms: leftover,
   )
 }
+
+pub type Beeper
+
+@external(javascript, "./app_ffi.mjs", "createBeeper")
+fn create_beeper() -> Beeper
+
+@external(javascript, "./app_ffi.mjs", "startBeeper")
+fn start_beeper(beeper: Beeper) -> Nil
+
+@external(javascript, "./app_ffi.mjs", "stopBeeper")
+fn stop_beeper(beeper: Beeper) -> Nil
 
 fn register_key_handlers() {
   effect.from(fn(dispatch) {
