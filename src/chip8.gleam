@@ -231,7 +231,7 @@ pub fn new_system(rom: List(Int)) -> Result(System, SystemError) {
     screen: iv.repeat(False, times: screen_size),
     index_register: 0,
     stack: [],
-    delay_timer: 360,
+    delay_timer: 0,
     sound_timer: 0,
     registers: int.range(from: 0, to: 16, with: dict.new(), run: fn(acc, i) {
       dict.insert(acc, i, 0)
